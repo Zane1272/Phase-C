@@ -13,7 +13,8 @@ from scipy.ndimage import binary_dilation, label
 import torch
 import torch.nn.functional as F
 
-def mass_function(image,x,y):
+def mass_function(image,rho):
+    'where rhon must map to the side of the plate mask'
     
     #using the same mapping as top plate vibration for eaiser later integration
     img = Image.open("guitar_top.png").resize((200, 200))
@@ -39,9 +40,17 @@ def mass_function(image,x,y):
 
     Nx, Ny = plate.shape
 
-    
+    plate_mass = np.tensor(plate.shape)
 
-m_p = mass_function('guitar_top.png',x,y)    # we want this to be a function 
+    for x, y in range(plate.shape):
+        if plate.shape[x,y]=True:
+            plate_mass[x,y] = rho[x,y]
+    
+    return plate_mass
+
+
+
+m_p = mass_function('guitar_top.png')    # we want this to be a function 
 m_a = 0.01      # kg, air piston mass
 k_p = 1000.0    # N/m, top plate stiffness
 R_p = 0.5       # kg/s, damping top plate
@@ -76,40 +85,9 @@ R_dist = 1.0   # m, distance to microphone
 U = A * u_p + S * u_a
 p_sound = -1j * rho * omega * U / (4 * np.pi * R_dist)
 
-# Plot velocity magnitude of top plate
-plt.figure(figsize=(10, 6))
-plt.plot(frequencies, np.abs(u_p), label='Top plate velocity |u_p|')
-#plt.plot(frequencies, np.abs(u_a), label='Air piston velocity |u_a|')
-#plt.plot(frequencies, np.abs(p_sound), label='Sound pressure |p|')
-plt.xlabel('Frequency (Hz)')
-plt.ylabel('Amplitude')
-plt.title('Coupled Guitar Top Plate & Helmholtz Resonance')
-plt.legend()
-plt.grid(True)
-plt.show()
+# we want a map of the top plate at 440Hz, where we see the air piston movement at each position
 
-plt.figure(figsize=(10, 6))
-#plt.plot(frequencies, np.abs(u_p), label='Top plate velocity |u_p|')
-plt.plot(frequencies, np.abs(u_a), label='Air piston velocity |u_a|')
-#plt.plot(frequencies, np.abs(p_sound), label='Sound pressure |p|')
-plt.xlabel('Frequency (Hz)')
-plt.ylabel('Amplitude')
-plt.title('Coupled Guitar Top Plate & Helmholtz Resonance')
-plt.legend()
-plt.grid(True)
-plt.show()
-# In[ ]:
-
-plt.figure(figsize=(10, 6))
-#plt.plot(frequencies, np.abs(u_p), label='Top plate velocity |u_p|')
-#plt.plot(frequencies, np.abs(u_a), label='Air piston velocity |u_a|')
-plt.plot(frequencies, np.abs(p_sound), label='Sound pressure |p|')
-plt.xlabel('Frequency (Hz)')
-plt.ylabel('Amplitude')
-plt.title('Coupled Guitar Top Plate & Helmholtz Resonance')
-plt.legend()
-plt.grid(True)
-plt.show()
+# we want to map total top plate and air piston velocity with plastic properties to match results from paper
 
 
 
