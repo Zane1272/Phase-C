@@ -6,8 +6,42 @@
 
 import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
+import matplotlib.pyplot as plt
+from PIL import Image
+from scipy.ndimage import binary_dilation, label
+import torch
+import torch.nn.functional as F
 
-m_p = 0.05      # kg, top plate mass
+def mass_function(image,x,y):
+    
+    #using the same mapping as top plate vibration for eaiser later integration
+    img = Image.open("guitar_top.png").resize((200, 200))
+    arr = np.array(img)
+
+    if arr.ndim == 3:
+        gray = arr[:, :, 0]
+    else:
+        gray = arr
+    plate = gray < 128
+    white = gray > 200
+
+    labels, num = label(white)
+    if num > 0:
+        sizes = [(labels == i).sum() for i in range(1, num + 1)]
+        soundhole_label = 1 + np.argmax(sizes)
+        soundhole = labels == soundhole_label
+    else:
+        soundhole = np.zeros_like(plate, bool)
+
+    plate[soundhole] = False
+    clamped = ~(plate | soundhole)
+
+    Nx, Ny = plate.shape
+
+    
+
+m_p = mass_function('guitar_top.png',x,y)    # we want this to be a function 
 m_a = 0.01      # kg, air piston mass
 k_p = 1000.0    # N/m, top plate stiffness
 R_p = 0.5       # kg/s, damping top plate
