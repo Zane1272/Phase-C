@@ -13,8 +13,8 @@ from scipy.ndimage import binary_dilation, label
 import torch
 import torch.nn.functional as F
 
-def rho(x,y):
-    return 1500*x + 1500*y
+def rho(x,y): #to be ammended according to Joanna´s findings
+    return 1.500*x + 1.500*y
     
 
 
@@ -60,7 +60,7 @@ m_a = 0.01      # kg, air piston mass
 k_p = 1000.0    # N/m, top plate stiffness
 R_p = 0.5       # kg/s, damping top plate
 R_a = 0.05      # kg/s, damping air piston
-A = 0.02        # m^2, top plate area
+A = 0.02        # want this as the same as above
 S = 0.01        # m^2, air piston area
 F0 = 1.0        # N, harmonic force amplitude
 
@@ -93,6 +93,24 @@ p_sound = -1j * rho * omega * U / (4 * np.pi * R_dist)
 # we want a map of the top plate at 440Hz, where we see the air piston movement at each position
 
 # we want to map total top plate and air piston velocity with plastic properties to match results from paper
+# making sure to uniformise formats
+physical_height_m = 0.50  # 50 cm
+dx_phys = physical_height_m / plate_pixel_height
+physical_width_m = dx_phys * m_p[1]
 
+extent = [0, physical_width_m * 100, physical_height_m * 100, 0]  # for cm
 
+plt.figure(figsize=(6, 6))
+plt.imshow(u_p[440], cmap='inferno', origin='upper', extent=extent, aspect='equal')
+plt.colorbar(label="top plate velocity")
+plt.show()
 
+plt.figure(figsize=(6, 6))
+plt.imshow(u_a[440], cmap='inferno', origin='upper', extent=extent, aspect='equal')
+plt.colorbar(label="air piston velocity")
+plt.show()
+
+plt.figure(figsize=(6, 6))
+plt.imshow(p_sound[440], cmap='inferno', origin='upper', extent=extent, aspect='equal')
+plt.colorbar(label="sound pressure")
+plt.show()
