@@ -14,7 +14,7 @@ import torch
 import torch.nn.functional as F
 
 def rho_plate(x,y): #to be ammended according to Joanna´s findings
-    return 1.500*x + 1.500*y
+    return 0.5 + 0.002*x + 0.002*y
     
 
 
@@ -43,6 +43,15 @@ def mass_function(image,rho):
     plate[soundhole] = False
     clamped = ~(plate | soundhole)
 
+    #from guitartop.py
+    rows_with_plate = np.any(plate, axis=1)
+    plate_row_indices = np.where(rows_with_plate)[0]
+
+    top_row = plate_row_indices[0]
+    bottom_row = plate_row_indices[-1]
+    plate_pixel_height = bottom_row - top_row + 1
+
+
     Nx, Ny = plate.shape
 
     plate_mass = np.zeros_like(plate, dtype=float)
@@ -50,13 +59,15 @@ def mass_function(image,rho):
     for x in range(Nx):
         for y in range(Ny):
             if plate[x,y]==True:
-                plate_mass[x,y] = rho_plate(x,y)
+                plate_mass[x,y] = rho(x,y)
         
-    return plate_mass
+    return plate_mass, plate_pixel_height
 
 
 
-m_p = mass_function('guitar_top.png',rho)    # we want this to be a function 
+m_p = mass_function('guitar_top.png',rho_plate)[0]
+m_p[m_p == 0] = np.nan
+   # we want this to be a function 
 m_a = 0.01      # kg, air piston mass
 k_p = 1000.0    # N/m, top plate stiffness
 R_p = 0.5       # kg/s, damping top plate
@@ -66,38 +77,41 @@ S = 0.01        # m^2, air piston area
 F0 = 1.0        # N, harmonic force amplitude
 
 # Derived frequencies
-omega_p = np.vectorize(np.sqrt(k_p / m_p))       # rad/s, natural freq plate
+omega_p = np.sqrt(k_p / m_p)      # rad/s, natural freq plate
 omega_a = 200.0                     # rad/s, Helmholtz frequency (example)
 a_coupling = 500.0                  # coupling constant
-omega_c2 = np.vectorize(a_coupling / np.sqrt(m_p * m_a))  # coupling frequency squared
+omega_c2 = a_coupling / np.sqrt(m_p * m_a)  # coupling frequency squared
 
 # Frequency array
 frequencies = np.linspace(50, 400, 1000)  # Hz
 omega = 2 * np.pi * frequencies           # rad/s
-
+omega3 = omega[:, None, None] #make sure shapes match
 # Damping
 gamma_p = R_p / m_p
 gamma_a = R_a / m_a
 
 # Frequency response
-D = (omega_p**2 - omega**2 + 1j*gamma_p*omega) * (omega_a**2 - omega**2 + 1j*gamma_a*omega) - omega_c2**2
+D = (omega_p**2 - omega3**2 + 1j*gamma_p*omega3) * \
+    (omega_a**2 - omega3**2 + 1j*gamma_a*omega3) - omega_c2**2 #match D to fit 2D plate sim
 
-u_p = 1j * omega * (F0 / m_p) * (omega_a**2 - omega**2 + 1j*gamma_a*omega) / D
-u_a = -1j * omega * (F0 / m_p) * (A/S) * (omega_p**2 - omega**2 + 1j*gamma_p*omega) / D
+
+u_p = 1j * omega3 * (F0 / m_p) * (omega_a**2 - omega**2 + 1j*gamma_a*omega3) / D
+u_a = -1j * omega3 * (F0 / m_p) * (A/S) * (omega_p**2 - omega**2 + 1j*gamma_p*omega3) / D
 
 # Sound pressure (far field)
-rho = 1.2      
+rho_air = 1.2      
 R_dist = 1.0   # m, distance to microphone
 U = A * u_p + S * u_a
-p_sound = -1j * rho * omega * U / (4 * np.pi * R_dist)
+p_sound = -1j * rho_air * omega3 * U / (4 * np.pi * R_dist)
 
+plate_pixel_height = mass_function('guitar_top.png',rho_plate)[1]
 # we want a map of the top plate at 440Hz, where we see the air piston movement at each position
 
 # we want to map total top plate and air piston velocity with plastic properties to match results from paper
 # making sure to uniformise formats
 physical_height_m = 0.50  # 50 cm
 dx_phys = physical_height_m / plate_pixel_height
-physical_width_m = dx_phys * m_p[1]
+physical_width_m = dx_phys * m_p.shape[1]
 
 extent = [0, physical_width_m * 100, physical_height_m * 100, 0]  # for cm
 
