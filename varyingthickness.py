@@ -13,7 +13,7 @@ from scipy.ndimage import binary_dilation, label
 import torch
 import torch.nn.functional as F
 
-def rho(x,y): #to be ammended according to Joanna´s findings
+def rho_plate(x,y): #to be ammended according to Joanna´s findings
     return 1.500*x + 1.500*y
     
 
@@ -45,17 +45,18 @@ def mass_function(image,rho):
 
     Nx, Ny = plate.shape
 
-    plate_mass = np.tensor(plate.shape)
+    plate_mass = np.zeros_like(plate, dtype=float)
 
-    for x, y in range(plate.shape):
-        if plate.shape[x,y]=True:
-            plate_mass[x,y] = rho(x,y)
-    
+    for x in range(Nx):
+        for y in range(Ny):
+            if plate[x,y]==True:
+                plate_mass[x,y] = rho_plate(x,y)
+        
     return plate_mass
 
 
 
-m_p = mass_function('guitar_top.png')    # we want this to be a function 
+m_p = mass_function('guitar_top.png',rho)    # we want this to be a function 
 m_a = 0.01      # kg, air piston mass
 k_p = 1000.0    # N/m, top plate stiffness
 R_p = 0.5       # kg/s, damping top plate
@@ -65,10 +66,10 @@ S = 0.01        # m^2, air piston area
 F0 = 1.0        # N, harmonic force amplitude
 
 # Derived frequencies
-omega_p = np.sqrt(k_p / m_p)       # rad/s, natural freq plate
+omega_p = np.vectorize(np.sqrt(k_p / m_p))       # rad/s, natural freq plate
 omega_a = 200.0                     # rad/s, Helmholtz frequency (example)
 a_coupling = 500.0                  # coupling constant
-omega_c2 = a_coupling / np.sqrt(m_p * m_a)  # coupling frequency squared
+omega_c2 = np.vectorize(a_coupling / np.sqrt(m_p * m_a))  # coupling frequency squared
 
 # Frequency array
 frequencies = np.linspace(50, 400, 1000)  # Hz
@@ -85,7 +86,7 @@ u_p = 1j * omega * (F0 / m_p) * (omega_a**2 - omega**2 + 1j*gamma_a*omega) / D
 u_a = -1j * omega * (F0 / m_p) * (A/S) * (omega_p**2 - omega**2 + 1j*gamma_p*omega) / D
 
 # Sound pressure (far field)
-#rho = 1.2      #made this into a function
+rho = 1.2      
 R_dist = 1.0   # m, distance to microphone
 U = A * u_p + S * u_a
 p_sound = -1j * rho * omega * U / (4 * np.pi * R_dist)
@@ -101,16 +102,16 @@ physical_width_m = dx_phys * m_p[1]
 extent = [0, physical_width_m * 100, physical_height_m * 100, 0]  # for cm
 
 plt.figure(figsize=(6, 6))
-plt.imshow(u_p[440], cmap='inferno', origin='upper', extent=extent, aspect='equal')
+plt.imshow(u_p[np.argmin(np.abs(frequencies - 440))], cmap='inferno', origin='upper', extent=extent, aspect='equal')
 plt.colorbar(label="top plate velocity")
 plt.show()
 
 plt.figure(figsize=(6, 6))
-plt.imshow(u_a[440], cmap='inferno', origin='upper', extent=extent, aspect='equal')
+plt.imshow(u_a[np.argmin(np.abs(frequencies - 440))], cmap='inferno', origin='upper', extent=extent, aspect='equal')
 plt.colorbar(label="air piston velocity")
 plt.show()
 
 plt.figure(figsize=(6, 6))
-plt.imshow(p_sound[440], cmap='inferno', origin='upper', extent=extent, aspect='equal')
+plt.imshow(p_sound[np.argmin(np.abs(frequencies - 440))], cmap='inferno', origin='upper', extent=extent, aspect='equal')
 plt.colorbar(label="sound pressure")
 plt.show()
