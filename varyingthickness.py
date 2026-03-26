@@ -13,8 +13,13 @@ from scipy.ndimage import binary_dilation, label
 import torch
 import torch.nn.functional as F
 
+def rho(x,y):
+    return 1500*x + 1500*y
+    
+
+
 def mass_function(image,rho):
-    'where rhon must map to the side of the plate mask'
+    'where rho must map to the side of the plate mask'
     
     #using the same mapping as top plate vibration for eaiser later integration
     img = Image.open("guitar_top.png").resize((200, 200))
@@ -44,7 +49,7 @@ def mass_function(image,rho):
 
     for x, y in range(plate.shape):
         if plate.shape[x,y]=True:
-            plate_mass[x,y] = rho[x,y]
+            plate_mass[x,y] = rho(x,y)
     
     return plate_mass
 
@@ -80,7 +85,7 @@ u_p = 1j * omega * (F0 / m_p) * (omega_a**2 - omega**2 + 1j*gamma_a*omega) / D
 u_a = -1j * omega * (F0 / m_p) * (A/S) * (omega_p**2 - omega**2 + 1j*gamma_p*omega) / D
 
 # Sound pressure (far field)
-rho = 1.2      # kg/m^3, air density
+#rho = 1.2      #made this into a function
 R_dist = 1.0   # m, distance to microphone
 U = A * u_p + S * u_a
 p_sound = -1j * rho * omega * U / (4 * np.pi * R_dist)
