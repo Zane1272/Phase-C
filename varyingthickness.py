@@ -10,11 +10,10 @@ import numpy as np
 import matplotlib.pyplot as plt
 from PIL import Image
 from scipy.ndimage import binary_dilation, label
-import torch
 import torch.nn.functional as F
 
 def rho_plate(x,y): #to be ammended according to Joanna´s findings
-    return 0.5 + 0.002*x + 0.002*y
+    return 1
     
 
 
@@ -65,7 +64,7 @@ def mass_function(image,rho):
 
 
 
-m_p = mass_function('guitar_top.png',rho_plate)[0]
+m_p,plate_pixel_height = mass_function('guitar_top.png',rho_plate)
 m_p[m_p == 0] = np.nan
    # we want this to be a function 
 m_a = 0.01      # kg, air piston mass
@@ -95,8 +94,8 @@ D = (omega_p**2 - omega3**2 + 1j*gamma_p*omega3) * \
     (omega_a**2 - omega3**2 + 1j*gamma_a*omega3) - omega_c2**2 #match D to fit 2D plate sim
 
 
-u_p = 1j * omega3 * (F0 / m_p) * (omega_a**2 - omega**2 + 1j*gamma_a*omega3) / D
-u_a = -1j * omega3 * (F0 / m_p) * (A/S) * (omega_p**2 - omega**2 + 1j*gamma_p*omega3) / D
+u_p = 1j * omega3 * (F0 / m_p) * (omega_a**2 - omega3**2 + 1j*gamma_a*omega3) / D
+u_a = -1j * omega3 * (F0 / m_p) * (A/S) * (omega_p**2 - omega3**2 + 1j*gamma_p*omega3) / D
 
 # Sound pressure (far field)
 rho_air = 1.2      
@@ -104,7 +103,6 @@ R_dist = 1.0   # m, distance to microphone
 U = A * u_p + S * u_a
 p_sound = -1j * rho_air * omega3 * U / (4 * np.pi * R_dist)
 
-plate_pixel_height = mass_function('guitar_top.png',rho_plate)[1]
 # we want a map of the top plate at 440Hz, where we see the air piston movement at each position
 
 # we want to map total top plate and air piston velocity with plastic properties to match results from paper
@@ -115,17 +113,19 @@ physical_width_m = dx_phys * m_p.shape[1]
 
 extent = [0, physical_width_m * 100, physical_height_m * 100, 0]  # for cm
 
-plt.figure(figsize=(6, 6))
-plt.imshow(u_p[np.argmin(np.abs(frequencies - 440))], cmap='inferno', origin='upper', extent=extent, aspect='equal')
-plt.colorbar(label="top plate velocity")
+idx = np.argmin(np.abs(frequencies - 440))
+
+plt.figure(figsize=(6,6))
+plt.imshow(np.abs(u_p[idx]), cmap='viridis', origin='upper', extent=extent, aspect='equal')
+plt.colorbar(label="Top plate velocity (magnitude)")
 plt.show()
 
-plt.figure(figsize=(6, 6))
-plt.imshow(u_a[np.argmin(np.abs(frequencies - 440))], cmap='inferno', origin='upper', extent=extent, aspect='equal')
-plt.colorbar(label="air piston velocity")
+plt.figure(figsize=(6,6))
+plt.imshow(np.abs(u_a[idx]), cmap='viridis', origin='upper', extent=extent, aspect='equal')
+plt.colorbar(label="Air piston velocity (magnitude)")
 plt.show()
 
-plt.figure(figsize=(6, 6))
-plt.imshow(p_sound[np.argmin(np.abs(frequencies - 440))], cmap='inferno', origin='upper', extent=extent, aspect='equal')
-plt.colorbar(label="sound pressure")
+plt.figure(figsize=(6,6))
+plt.imshow(np.abs(p_sound[idx]), cmap='cividis', origin='upper', extent=extent, aspect='equal')
+plt.colorbar(label="Sound pressure (magnitude)")
 plt.show()
