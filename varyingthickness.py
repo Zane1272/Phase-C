@@ -21,7 +21,7 @@ def mass_function(image,rho):
     'where rho must map to the side of the plate mask'
     
     #using the same mapping as top plate vibration for eaiser later integration
-    img = Image.open("guitar_top.png").resize((200, 200))
+    img = Image.open("ukulele_top.png").resize((200, 200))
     arr = np.array(img)
 
     if arr.ndim == 3:
