@@ -12,7 +12,7 @@ from PIL import Image
 from scipy.ndimage import binary_dilation, label
 import torch.nn.functional as F
 
-from main import GeometryProcessor, Material
+from main import Material
 
 materials = [
     Material("Wood", 600, 1.0e10, 0.995),
@@ -21,26 +21,92 @@ materials = [
     Material("Composite", 900, 5.0e9, 0.994)
 ] #wood definition from main(1).py
 
-mask = GeometryProcessor.process('ukulele_top.png')
+import numpy as np
+from PIL import Image
+from scipy.ndimage import binary_dilation, label
+
+class GeometryProcessor2D:
+    """
+    Adapted from main.py for 2d images png rather than stl file
+    """
+
+    def __init__(self, file, nx=200, ny=200):
+        self.file = file
+        self.nx = nx
+        self.ny = ny
+
+    def process(self):
+        img = Image.open(self.file).resize((self.nx, self.ny))
+        arr = np.array(img)
+
+        # Grayscale or RGB
+        if arr.ndim == 3:
+            gray = arr[:, :, 0]
+        else:
+            gray = arr
+
+        # Plate mask (dark regions)
+        plate = gray < 128
+
+        # Soundhole detection (largest white region)
+        white = gray > 200
+        labels, num = label(white)
+        if num > 0:
+            sizes = [(labels == i).sum() for i in range(1, num + 1)]
+            soundhole_label = 1 + np.argmax(sizes)
+            soundhole = labels == soundhole_label
+        else:
+            soundhole = np.zeros_like(plate, bool)
+
+        plate[soundhole] = False
+        clamped = ~(plate | soundhole)
+
+        # Bridge detection (red-ish region)
+        if arr.ndim == 3:
+            R, G, B = arr[:, :, 0], arr[:, :, 1], arr[:, :, 2]
+            bridge_mask = (R > 150) & (G < 100) & (B < 100)
+            bridge_mask = binary_dilation(bridge_mask, iterations=1)
+        else:
+            bridge_mask = np.zeros_like(plate, bool)
+
+        # Fallback if bridge not detected
+        if not np.any(bridge_mask):
+            Nx, Ny = plate.shape
+            cx, cy = Nx // 2, int(Ny * 0.7)
+            bridge_mask[cx - 1:cx + 2, cy - 1:cy + 2] = True
+
+        return {
+            "plate": plate.astype(float),
+            "soundhole": soundhole.astype(float),
+            "clamped": clamped.astype(float),
+            "bridge": bridge_mask.astype(float),
+        }
+geo = GeometryProcessor2D("guitar_top.png", nx=200, ny=200)
+mask = geo.process()
+
 frequencies = [440]
 
-def rho_plate(x,y,mask): #to be ammended according to Joanna´s findings
+plate_mask      = masks["plate"]      # main vibrating plate
+soundhole_mask  = masks["soundhole"]  # soundhole
+clamped_mask    = masks["clamped"]    # clamped edges
+bridge_mask     = masks["bridge"]     # bridge excitation
+
+def rho_plate(x,y,mask,material): #to be ammended according to Joanna´s findings
     Nx, Ny = mask.shape
     rho_map = np.zeros_like(mask, dtype=float)
     E_map = np.zeros_like(mask, dtype=float)
     damping_map = np.zeros_like(mask, dtype=float)
 
-    for x in range(Nx):
-        for y in range(Ny):
-            if mask[x,y]:
-                # Example: choose material per region
-                rho_map[x,y] = 600         # Wood density
-                E_map[x,y] = 1.0e10        # Wood Young's modulus
-                damping_map[x,y] = 0.995   # Wood damping
-            else:
-                rho_map[x,y] = 1e-3  # negligible mass outside plate
-                E_map[x,y] = 1e3
-                damping_map[x,y] = 1.0
+    for i in range(Nx):
+        for j in range(Ny):
+            if mask[i, j]:  # only assign inside the plate
+                rho_map[i, j] = material.rho
+                E_map[i, j] = material.E
+                damping_map[i, j] = material.damping
+            else:  # outside the plate
+                rho_map[i, j] = 1e-3
+                E_map[i, j] = 1e3
+                damping_map[i, j] = 1.0
 
     return rho_map, E_map, damping_map
     
@@ -93,7 +159,7 @@ def mass_function(image,rho):
 
 
 
-m_p,plate_pixel_height = mass_function('guitar_top.png', lambda x,y: rho_plate(x,y, mask)[0])
+m_p,plate_pixel_height = mass_function('guitar_top.png', lambda x,y: rho_plate(x,y, mask,material)[0])
 m_p[m_p == 0] = np.nan
    # we want this to be a function 
 m_a = 0.01      # kg, air piston mass
