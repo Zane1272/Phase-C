@@ -12,6 +12,8 @@ from PIL import Image
 from scipy.ndimage import binary_dilation, label
 import torch.nn.functional as F
 
+from main(1) import GeometryProcessor
+
 materials = [
     Material("Wood", 600, 1.0e10, 0.995),
     Material("PLA", 1250, 3.0e9, 0.993),
@@ -19,7 +21,10 @@ materials = [
     Material("Composite", 900, 5.0e9, 0.994)
 ] #wood definition from main(1).py
 
-def rho_plate(x,y): #to be ammended according to Joanna´s findings
+mask = GeometryProcessor.process('ukulele_top.py')
+frequencies = 440
+
+def rho_plate(x,y,mask): #to be ammended according to Joanna´s findings
     Nx, Ny = mask.shape
     rho_map = np.zeros_like(mask, dtype=float)
     E_map = np.zeros_like(mask, dtype=float)
@@ -88,7 +93,7 @@ def mass_function(image,rho):
 
 
 
-m_p,plate_pixel_height = mass_function('guitar_top.png',rho_plate)
+m_p,plate_pixel_height = mass_function('guitar_top.png', lambda x,y: rho_plate(x,y, mask)[0])
 m_p[m_p == 0] = np.nan
    # we want this to be a function 
 m_a = 0.01      # kg, air piston mass
@@ -99,18 +104,46 @@ A = 0.02        # want this as the same as above
 S = 0.01        # m^2, air piston area
 F0 = 1.0        # N, harmonic force amplitude
 
+
+# Assuming you have a binary mask of the plate
+# and the materials dictionary/list
+
+#adapt to accept material properties format
+
+Nx, Ny = mask.shape
+rho_map = np.zeros_like(mask, dtype=float)
+E_map = np.zeros_like(mask, dtype=float)
+damping_map = np.zeros_like(mask, dtype=float)
+
+# Assign material properties per pixel
+for i in range(Nx):
+    for j in range(Ny):
+        if mask[i, j]:
+            # Example: assign different materials in regions if needed
+            rho_map[i, j] = 600         # Wood density
+            E_map[i, j] = 1.0e10       # Wood Young's modulus
+            damping_map[i, j] = 0.995  # Wood damping
+        else:
+            rho_map[i, j] = 1e-3       # negligible mass outside plate
+            E_map[i, j] = 1e3
+            damping_map[i, j] = 1.0
+
+# Local wave speed per pixel
+#from main(1).py
+c_map = np.sqrt(E_map / rho_map)  
+
+
 # Derived frequencies
-omega_p = np.sqrt(k_p / m_p)      # rad/s, natural freq plate
+omega_p = np.sqrt(E_map / rho_map)   #change to per pixel    # rad/s, natural freq plate
 omega_a = 200.0                     # rad/s, Helmholtz frequency (example)
 a_coupling = 500.0                  # coupling constant
 omega_c2 = a_coupling / np.sqrt(m_p * m_a)  # coupling frequency squared
 
-# Frequency array
-frequencies = np.linspace(50, 400, 1000)  # Hz
-omega = 2 * np.pi * frequencies           # rad/s
+ # Hz
+omega = 2 * np.pi * 440        # rad/s
 omega3 = omega[:, None, None] #make sure shapes match
 # Damping
-gamma_p = R_p / m_p
+gamma_p =  R_p / rho_map  #change to per pixel
 gamma_a = R_a / m_a
 
 # Frequency response
@@ -139,6 +172,33 @@ extent = [0, physical_width_m * 100, physical_height_m * 100, 0]  # for cm
 
 idx = np.argmin(np.abs(frequencies - 440))
 
+#find total speed with material properties of wave propagation
+
+u_total = u_p[idx] +  u_a[idx]
+
+results_per_material = {}
+
+for mat in materials:
+    # Assign material properties
+    rho_map[mask==1] = mat.rho
+    E_map[mask==1] = mat.E
+    damping_map[mask==1] = mat.damping
+
+    # Per-pixel natural frequency and damping
+    omega_p_map = np.sqrt(E_map / rho_map)
+    gamma_p_map = R_p / rho_map  # or damping_map if you want material damping
+
+    # Frequency-domain response (per-pixel)
+    D_map = (omega_p_map**2 - omega**2 + 1j*gamma_p_map*omega) * \
+            (omega_a**2 - omega**2 + 1j*gamma_a*omega) - omega_c2**2
+
+    u_p_map = 1j * omega * (F0 / rho_map) * (omega_a**2 - omega**2 + 1j*gamma_a*omega) / D_map
+    u_a_map = -1j * omega * (F0 / rho_map) * (A/S) * (omega_p_map**2 - omega**2 + 1j*gamma_p_map*omega) / D_map
+
+    # Total top plate + air piston velocity
+    u_total_map = u_p_map + mask * u_a_map
+
+    results_per_material[mat.name] = u_total_map
 
 plt.figure(figsize=(6,6))
 plt.imshow(np.abs(u_p[idx]), cmap='viridis', origin='upper', extent=extent, aspect='equal')
@@ -155,10 +215,12 @@ plt.imshow(np.abs(p_sound[idx]), cmap='cividis', origin='upper', extent=extent, 
 plt.colorbar(label="Sound pressure (magnitude)")
 plt.show()
 
-for i in materials:
+fig, axes = plt.subplots(1, len(materials), figsize=(18,6))
 
-    u_total = u[idx] + mask * u_a[idx] #combined velcity with wave propagation properties
-    plt.figure(figsize=(6,6))
-    plt.imshow(np.abs(u_total[idx]), cmap='viridis', origin='upper', extent=extent, aspect='equal')
-    plt.colorbar(label="Sound pressure (magnitude)")
-    plt.show()
+for ax, (name, u_total) in zip(axes, results_per_material.items()):
+    im = ax.imshow(np.abs(u_total), cmap='viridis', origin='upper', extent=extent, aspect='equal')
+    ax.set_title(name)
+    ax.axis('off')
+
+fig.colorbar(im, ax=axes.ravel().tolist(), shrink=0.8, label="Plate + air piston velocity")
+plt.show()
