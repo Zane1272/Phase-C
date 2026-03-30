@@ -12,8 +12,32 @@ from PIL import Image
 from scipy.ndimage import binary_dilation, label
 import torch.nn.functional as F
 
+materials = [
+    Material("Wood", 600, 1.0e10, 0.995),
+    Material("PLA", 1250, 3.0e9, 0.993),
+    Material("ABS", 1050, 2.0e9, 0.992),
+    Material("Composite", 900, 5.0e9, 0.994)
+] #wood definition from main(1).py
+
 def rho_plate(x,y): #to be ammended according to Joanna´s findings
-    return 1
+    Nx, Ny = mask.shape
+    rho_map = np.zeros_like(mask, dtype=float)
+    E_map = np.zeros_like(mask, dtype=float)
+    damping_map = np.zeros_like(mask, dtype=float)
+
+    for x in range(Nx):
+        for y in range(Ny):
+            if mask[x,y]:
+                # Example: choose material per region
+                rho_map[x,y] = 600         # Wood density
+                E_map[x,y] = 1.0e10        # Wood Young's modulus
+                damping_map[x,y] = 0.995   # Wood damping
+            else:
+                rho_map[x,y] = 1e-3  # negligible mass outside plate
+                E_map[x,y] = 1e3
+                damping_map[x,y] = 1.0
+
+    return rho_map, E_map, damping_map
     
 
 
@@ -115,6 +139,7 @@ extent = [0, physical_width_m * 100, physical_height_m * 100, 0]  # for cm
 
 idx = np.argmin(np.abs(frequencies - 440))
 
+
 plt.figure(figsize=(6,6))
 plt.imshow(np.abs(u_p[idx]), cmap='viridis', origin='upper', extent=extent, aspect='equal')
 plt.colorbar(label="Top plate velocity (magnitude)")
@@ -129,3 +154,11 @@ plt.figure(figsize=(6,6))
 plt.imshow(np.abs(p_sound[idx]), cmap='cividis', origin='upper', extent=extent, aspect='equal')
 plt.colorbar(label="Sound pressure (magnitude)")
 plt.show()
+
+for i in materials:
+
+    u_total = u[idx] + mask * u_a[idx] #combined velcity with wave propagation properties
+    plt.figure(figsize=(6,6))
+    plt.imshow(np.abs(u_total[idx]), cmap='viridis', origin='upper', extent=extent, aspect='equal')
+    plt.colorbar(label="Sound pressure (magnitude)")
+    plt.show()
