@@ -171,6 +171,7 @@ def plate_air_response(omega_p_map, plate, material):
     A = 0.02
     S = 0.01
     F0 = 1.0
+     # plate stiffness constant
 
     omega_a = 200
     a_coupling = 500
@@ -184,10 +185,14 @@ def plate_air_response(omega_p_map, plate, material):
 
     omega_c2 = a_coupling
 
-    omega_p = omega_p_map[None,:,:]
+    h = 0.003  # plate thickness (m)
+    nu = 0.3
 
-    D = (omega_p**2 - omega3**2 + 1j*gamma_p*omega3) * \
-        (omega_a**2 - omega3**2 + 1j*gamma_a*omega3) - omega_c2**2
+    #using the model from the paper leissa vibration of plates
+
+    D = material.E * h**3 / (12*(1-nu**2))
+
+    omega_p = np.sqrt(D / (m_p * h))
 
     u_p = 1j*omega3*F0*(omega_a**2 - omega3**2 + 1j*gamma_a*omega3)/D
 
