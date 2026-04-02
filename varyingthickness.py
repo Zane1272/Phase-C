@@ -136,54 +136,75 @@ class Analyzer:
         brightness = np.sum(spectrum[len(spectrum)//4:]) / np.sum(spectrum)
         return sustain, peak_freq, brightness
 
-class Simulation:
+def plate_frequency_map(image, material):
 
-    def __init__(self, mask, bridge_mask):
-        self.mask = mask
-        self.bridge_mask = bridge_mask
-        self.nx, self.ny = mask.shape
-        self.dx = 0.01
-        self.steps = 500
+    img = Image.open(image).resize((200,200))
+    arr = np.array(img)
 
-    def run(self, material):
-        c = material.wave_speed()
-        dt = 0.3 * self.dx / (c + 1e-8)
+    if arr.ndim == 3:
+        gray = arr[:,:,0]
+    else:
+        gray = arr
 
-        solver = WaveSolver(self.nx, self.ny, self.dx, dt, self.mask, self.bridge_mask)
+    plate = gray < 128
 
-        solver.reset()
-        solver.apply_excitation()
+    Nx, Ny = plate.shape
 
-        energy_hist = []
-        fields_over_time = []
+    c = material.wave_speed()
 
-        for t in range(self.steps):
-            solver.step(c, material.damping)
-            fields_over_time.append(solver.u.copy())
-            e = solver.energy()
-            if np.isnan(e) or np.isinf(e):
-                break
-            energy_hist.append(e)
+    L = 0.5        # physical plate length (m)
+    k = np.pi / L
 
-        fields_over_time = np.array(fields_over_time)
-        energy_hist = np.array(energy_hist)
+    omega_p_map = np.zeros_like(plate, dtype=float)
 
-        freq, spectrum = Analyzer.fft(energy_hist, dt)
-        sustain, peak_freq, brightness = Analyzer.metrics(energy_hist, freq, spectrum)
+    omega_p_map[plate] = c * k
 
-        return {
-            "field": solver.u.copy(),
-            "fields_over_time": fields_over_time,
-            "energy": energy_hist,
-            "freq": freq,
-            "spectrum": spectrum,
-            "metrics": {
-                "sustain": sustain,
-                "peak_freq": peak_freq,
-                "brightness": brightness
-            },
-            "c": c
-        }
+    return omega_p_map, plate
+
+def plate_air_response(omega_p_map, plate, material):
+
+    Nx, Ny = omega_p_map.shape
+
+    m_a = 0.01
+    R_p = 0.5
+    R_a = 0.05
+    A = 0.02
+    S = 0.01
+    F0 = 1.0
+
+    omega_a = 200
+    a_coupling = 500
+
+    frequencies = np.linspace(50,400,1000)
+    omega = 2*np.pi*frequencies
+    omega3 = omega[:,None,None]
+
+    gamma_p = R_p
+    gamma_a = R_a/m_a
+
+    omega_c2 = a_coupling
+
+    omega_p = omega_p_map[None,:,:]
+
+    D = (omega_p**2 - omega3**2 + 1j*gamma_p*omega3) * \
+        (omega_a**2 - omega3**2 + 1j*gamma_a*omega3) - omega_c2**2
+
+    u_p = 1j*omega3*F0*(omega_a**2 - omega3**2 + 1j*gamma_a*omega3)/D
+
+    u_a = -1j*omega3*F0*(A/S)*(omega_p**2 - omega3**2 + 1j*gamma_p*omega3)/D
+
+    rho_air = 1.2
+    R_dist = 1.0
+
+    U = A*u_p + S*u_a
+
+    p_sound = -1j*rho_air*omega3*U/(4*np.pi*R_dist)
+
+    u_p[:,~plate] = np.nan
+    u_a[:,~plate] = np.nan
+    p_sound[:,~plate] = np.nan
+
+    return frequencies, u_p, u_a, p_sound
 
 class Visualizer:
 
@@ -230,24 +251,8 @@ mask, bridge_mask = geo.process()
 
 Visualizer.mask(mask)
 
-sim = Simulation(mask, bridge_mask)
-
-results = {}
-
-for mat in materials:
-    print(f"Simulating {mat.name}...")
-    results[mat.name] = sim.run(mat)
-
-Visualizer.fields(results)
-Visualizer.energy(results)
-Visualizer.spectrum(results)
-
-print("\n=== RESULTS ===")
-for name,data in results.items():
-    print(name, data["metrics"])
-
 def rho_plate(x,y): #to be ammended according to Joanna´s findings
-    return Simulation(mask,bridge_mask)
+    return 600
 
 
 
@@ -348,6 +353,21 @@ extent = [0, physical_width_m * 100, physical_height_m * 100, 0]  # for cm
 
 idx = np.argmin(np.abs(frequencies - 440))
 
+results_acoustic = {}
+
+for mat in materials:
+
+    omega_map, plate = plate_frequency_map("guitar_top.png", mat)
+
+    freq, u_p, u_a, p = plate_air_response(omega_map, plate, mat)
+
+    results_acoustic[mat.name] = {
+        "freq": freq,
+        "u_p": u_p,
+        "u_a": u_a,
+        "p": p
+    }
+
 plt.figure(figsize=(6,6))
 plt.imshow(np.abs(u_p[idx]), cmap='viridis', origin='upper', extent=extent, aspect='equal')
 plt.colorbar(label="Top plate velocity (magnitude)")
@@ -362,4 +382,15 @@ plt.figure(figsize=(6,6))
 plt.imshow(np.abs(p_sound[idx]), cmap='cividis', origin='upper', extent=extent, aspect='equal')
 plt.colorbar(label="Sound pressure (magnitude)")
 plt.show()
+
+idx = np.argmin(np.abs(freq-440))
+
+for name,data in results_acoustic.items():
+
+    plt.figure(figsize=(6,6))
+    plt.title(name + " Plate Velocity")
+
+    plt.imshow(np.abs(data["u_p"][idx]), cmap="viridis")
+    plt.colorbar()
+    plt.show()
 
