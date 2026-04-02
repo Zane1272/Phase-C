@@ -10,25 +10,31 @@ import numpy as np
 import matplotlib.pyplot as plt
 from PIL import Image
 from scipy.ndimage import binary_dilation, label
+
 import torch.nn.functional as F
 
-from main import Material
+class Material:
+    def __init__(self, name, rho, E, damping):
+        self.name = name
+        self.rho = rho
+        self.E = E
+        self.damping = damping
+
+    def wave_speed(self):
+        return np.sqrt(self.E / self.rho)
 
 materials = [
     Material("Wood", 600, 1.0e10, 0.995),
     Material("PLA", 1250, 3.0e9, 0.993),
     Material("ABS", 1050, 2.0e9, 0.992),
     Material("Composite", 900, 5.0e9, 0.994)
-] #wood definition from main(1).py
+]
 
 import numpy as np
 from PIL import Image
 from scipy.ndimage import binary_dilation, label
 
-class GeometryProcessor2D:
-    """
-    Adapted from main.py for 2d images png rather than stl file
-    """
+class GeometryProcessorPNG:
 
     def __init__(self, file, nx=200, ny=200):
         self.file = file
@@ -39,18 +45,16 @@ class GeometryProcessor2D:
         img = Image.open(self.file).resize((self.nx, self.ny))
         arr = np.array(img)
 
-        # Grayscale or RGB
         if arr.ndim == 3:
             gray = arr[:, :, 0]
         else:
             gray = arr
 
-        # Plate mask (dark regions)
         plate = gray < 128
 
-        # Soundhole detection (largest white region)
         white = gray > 200
         labels, num = label(white)
+
         if num > 0:
             sizes = [(labels == i).sum() for i in range(1, num + 1)]
             soundhole_label = 1 + np.argmax(sizes)
@@ -61,68 +65,203 @@ class GeometryProcessor2D:
         plate[soundhole] = False
         clamped = ~(plate | soundhole)
 
-        # Bridge detection (red-ish region)
+        mask = plate.astype(float)
+        mask[clamped] = 0.0
+        mask[soundhole] = 0.0
+
         if arr.ndim == 3:
             R, G, B = arr[:, :, 0], arr[:, :, 1], arr[:, :, 2]
             bridge_mask = (R > 150) & (G < 100) & (B < 100)
             bridge_mask = binary_dilation(bridge_mask, iterations=1)
         else:
-            bridge_mask = np.zeros_like(plate, bool)
+            bridge_mask = np.zeros_like(mask, bool)
 
-        # Fallback if bridge not detected
-        if not np.any(bridge_mask):
-            Nx, Ny = plate.shape
-            cx, cy = Nx // 2, int(Ny * 0.7)
-            bridge_mask[cx - 1:cx + 2, cy - 1:cy + 2] = True
+        return mask, bridge_mask
+
+class WaveSolver:
+
+    def __init__(self, nx, ny, dx, dt, mask, bridge_mask):
+        self.nx = nx
+        self.ny = ny
+        self.dx = dx
+        self.dt = dt
+        self.mask = mask
+        self.bridge_mask = bridge_mask
+
+        self.u = np.zeros((nx, ny))
+        self.u_prev = np.zeros((nx, ny))
+
+    def reset(self):
+        self.u.fill(0)
+        self.u_prev.fill(0)
+
+    def apply_excitation(self):
+        self.u[self.bridge_mask] = 1.0
+
+    def laplacian(self):
+        u = self.u
+        return (
+            np.roll(u, 1, axis=0) +
+            np.roll(u, -1, axis=0) +
+            np.roll(u, 1, axis=1) +
+            np.roll(u, -1, axis=1) -
+            4*u
+        ) / (self.dx**2)
+
+    def step(self, c, damping):
+        lap = self.laplacian()
+        u_new = 2*self.u - self.u_prev + (c**2)*(self.dt**2)*lap
+        u_new *= damping
+        u_new *= self.mask
+        u_new = np.clip(u_new, -1e3, 1e3)
+        self.u_prev = self.u
+        self.u = u_new
+
+    def energy(self):
+        return np.sum(self.u**2)
+
+class Analyzer:
+
+    @staticmethod
+    def fft(signal, dt):
+        freq = np.fft.fftfreq(len(signal), dt)
+        spec = np.abs(np.fft.fft(signal))
+        return freq, spec
+
+    @staticmethod
+    def metrics(energy, freq, spectrum):
+        sustain = energy[-1] / (energy[0] + 1e-8)
+        peak_idx = np.argmax(spectrum[1:]) + 1
+        peak_freq = freq[peak_idx]
+        brightness = np.sum(spectrum[len(spectrum)//4:]) / np.sum(spectrum)
+        return sustain, peak_freq, brightness
+
+class Simulation:
+
+    def __init__(self, mask, bridge_mask):
+        self.mask = mask
+        self.bridge_mask = bridge_mask
+        self.nx, self.ny = mask.shape
+        self.dx = 0.01
+        self.steps = 500
+
+    def run(self, material):
+        c = material.wave_speed()
+        dt = 0.3 * self.dx / (c + 1e-8)
+
+        solver = WaveSolver(self.nx, self.ny, self.dx, dt, self.mask, self.bridge_mask)
+
+        solver.reset()
+        solver.apply_excitation()
+
+        energy_hist = []
+        fields_over_time = []
+
+        for t in range(self.steps):
+            solver.step(c, material.damping)
+            fields_over_time.append(solver.u.copy())
+            e = solver.energy()
+            if np.isnan(e) or np.isinf(e):
+                break
+            energy_hist.append(e)
+
+        fields_over_time = np.array(fields_over_time)
+        energy_hist = np.array(energy_hist)
+
+        freq, spectrum = Analyzer.fft(energy_hist, dt)
+        sustain, peak_freq, brightness = Analyzer.metrics(energy_hist, freq, spectrum)
 
         return {
-            "plate": plate.astype(float),
-            "soundhole": soundhole.astype(float),
-            "clamped": clamped.astype(float),
-            "bridge": bridge_mask.astype(float),
+            "field": solver.u.copy(),
+            "fields_over_time": fields_over_time,
+            "energy": energy_hist,
+            "freq": freq,
+            "spectrum": spectrum,
+            "metrics": {
+                "sustain": sustain,
+                "peak_freq": peak_freq,
+                "brightness": brightness
+            },
+            "c": c
         }
-geo = GeometryProcessor2D("guitar_top.png", nx=200, ny=200)
-mask = geo.process()
 
-frequencies = [440]
+class Visualizer:
 
-plate_mask      = masks["plate"]      # main vibrating plate
-soundhole_mask  = masks["soundhole"]  # soundhole
-clamped_mask    = masks["clamped"]    # clamped edges
-bridge_mask     = masks["bridge"]     # bridge excitation
+    @staticmethod
+    def mask(mask):
+        plt.imshow(mask, cmap='gray')
+        plt.title("Geometry Mask")
+        plt.axis("off")
+        plt.show()
 
-def rho_plate(x,y,mask,material): #to be ammended according to Joanna´s findings
-    Nx, Ny = mask.shape
-    rho_map = np.zeros_like(mask, dtype=float)
-    E_map = np.zeros_like(mask, dtype=float)
-    damping_map = np.zeros_like(mask, dtype=float)
+    @staticmethod
+    def fields(results):
+        plt.figure(figsize=(12,4))
+        for i,(name,data) in enumerate(results.items()):
+            plt.subplot(1,len(results),i+1)
+            plt.imshow(data["field"], cmap='hot')
+            plt.title(name)
+            plt.axis("off")
+        plt.show()
 
-    for i in range(Nx):
-        for j in range(Ny):
-            if mask[i, j]:  # only assign inside the plate
-                rho_map[i, j] = material.rho
-                E_map[i, j] = material.E
-                damping_map[i, j] = material.damping
-            else:  # outside the plate
-                rho_map[i, j] = 1e-3
-                E_map[i, j] = 1e3
-                damping_map[i, j] = 1.0
+    @staticmethod
+    def energy(results):
+        plt.figure()
+        for name,data in results.items():
+            plt.plot(data["energy"], label=name)
+        plt.legend()
+        plt.title("Energy Decay")
+        plt.show()
 
-    return rho_map, E_map, damping_map
-    
+    @staticmethod
+    def spectrum(results):
+        plt.figure()
+        for name,data in results.items():
+            plt.plot(data["freq"][:300], data["spectrum"][:300], label=name)
+        plt.legend()
+        plt.title("Frequency Spectrum")
+        plt.show()
+
+FILE = "ukulele_top.png"
+
+print("Processing geometry...")
+geo = GeometryProcessorPNG(FILE)
+mask, bridge_mask = geo.process()
+
+Visualizer.mask(mask)
+
+sim = Simulation(mask, bridge_mask)
+
+results = {}
+
+for mat in materials:
+    print(f"Simulating {mat.name}...")
+    results[mat.name] = sim.run(mat)
+
+Visualizer.fields(results)
+Visualizer.energy(results)
+Visualizer.spectrum(results)
+
+print("\n=== RESULTS ===")
+for name,data in results.items():
+    print(name, data["metrics"])
+
+def rho_plate(x,y): #to be ammended according to Joanna´s findings
+    return Simulation(mask,bridge_mask)
+
 
 
 def mass_function(image,rho):
-    'where rho must map to the side of the plate mask'
-    
+    #where rho must map to the side of the plate mask'''
+
     #using the same mapping as top plate vibration for eaiser later integration
-    img = Image.open("ukulele_top.png").resize((200, 200))
+    img = Image.open("guitar_top.png").resize((200, 200))
     arr = np.array(img)
 
     if arr.ndim == 3:
         gray = arr[:, :, 0]
     else:
-        gray = arr
+     gray = arr
     plate = gray < 128
     white = gray > 200
 
@@ -153,15 +292,14 @@ def mass_function(image,rho):
     for x in range(Nx):
         for y in range(Ny):
             if plate[x,y]==True:
-                plate_mass[x,y] = rho(x,y)
-        
+             plate_mass[x,y] = rho(x,y)
+
     return plate_mass, plate_pixel_height
 
 
-
-m_p,plate_pixel_height = mass_function('guitar_top.png', lambda x,y: rho_plate(x,y, mask,material)[0])
+m_p,plate_pixel_height = mass_function('guitar_top.png',rho_plate)
 m_p[m_p == 0] = np.nan
-   # we want this to be a function 
+# we want this to be a function 
 m_a = 0.01      # kg, air piston mass
 k_p = 1000.0    # N/m, top plate stiffness
 R_p = 0.5       # kg/s, damping top plate
@@ -170,46 +308,18 @@ A = 0.02        # want this as the same as above
 S = 0.01        # m^2, air piston area
 F0 = 1.0        # N, harmonic force amplitude
 
-
-# Assuming you have a binary mask of the plate
-# and the materials dictionary/list
-
-#adapt to accept material properties format
-
-Nx, Ny = mask.shape
-rho_map = np.zeros_like(mask, dtype=float)
-E_map = np.zeros_like(mask, dtype=float)
-damping_map = np.zeros_like(mask, dtype=float)
-
-# Assign material properties per pixel
-for i in range(Nx):
-    for j in range(Ny):
-        if mask[i, j]:
-            # Example: assign different materials in regions if needed
-            rho_map[i, j] = 600         # Wood density
-            E_map[i, j] = 1.0e10       # Wood Young's modulus
-            damping_map[i, j] = 0.995  # Wood damping
-        else:
-            rho_map[i, j] = 1e-3       # negligible mass outside plate
-            E_map[i, j] = 1e3
-            damping_map[i, j] = 1.0
-
-# Local wave speed per pixel
-#from main(1).py
-c_map = np.sqrt(E_map / rho_map)  
-
-
 # Derived frequencies
-omega_p = np.sqrt(E_map / rho_map)   #change to per pixel    # rad/s, natural freq plate
+omega_p = np.sqrt(k_p / m_p)      # rad/s, natural freq plate
 omega_a = 200.0                     # rad/s, Helmholtz frequency (example)
 a_coupling = 500.0                  # coupling constant
 omega_c2 = a_coupling / np.sqrt(m_p * m_a)  # coupling frequency squared
 
- # Hz
-omega = 2 * np.pi * 440        # rad/s
-omega3 = omega #make sure shapes match
+# Frequency array
+frequencies = np.linspace(50, 400, 1000)  # Hz
+omega = 2 * np.pi * frequencies           # rad/s
+omega3 = omega[:, None, None] #make sure shapes match
 # Damping
-gamma_p =  R_p / rho_map *damping_map #change to per pixel
+gamma_p = R_p / m_p
 gamma_a = R_a / m_a
 
 # Frequency response
@@ -238,58 +348,18 @@ extent = [0, physical_width_m * 100, physical_height_m * 100, 0]  # for cm
 
 idx = np.argmin(np.abs(frequencies - 440))
 
-#find total speed with material properties of wave propagation
-
-u_total = u_p +  u_a
-
-results_per_material = {}
-
-for mat in materials:
-    # Assign material properties
-    rho_map[mask==1] = mat.rho
-    E_map[mask==1] = mat.E
-    damping_map[mask==1] = mat.damping
-
-    # Per-pixel natural frequency and damping
-    omega_p_map = np.sqrt(E_map / rho_map)
-    gamma_p_map = R_p / rho_map * damping_map # or damping_map if you want material damping
-
-    # Frequency-domain response (per-pixel)
-    D_map = (omega_p_map**2 - omega**2 + 1j*gamma_p_map*omega) * \
-            (omega_a**2 - omega**2 + 1j*gamma_a*omega) - omega_c2**2
-
-    dx = physical_width_m / mask.shape[1]
-    dy = physical_height_m / mask.shape[0]
-    m_pixel = rho_map * dx * dy
-
-    u_p_map = 1j * omega * (F0 / m_pixel) * (omega_a**2 - omega**2 + 1j*gamma_a*omega) / D_map
-    u_a_map = -1j * omega * (F0 / m_pixel) * (A/S) * (omega_p_map**2 - omega**2 + 1j*gamma_p_map*omega) / D_map
-    # Total top plate + air piston velocity
-    u_total_map = u_p_map + mask * u_a_map
-
-    results_per_material[mat.name] = u_total_map
-
 plt.figure(figsize=(6,6))
-plt.imshow(np.abs(u_p), cmap='viridis', origin='upper', extent=extent, aspect='equal')
+plt.imshow(np.abs(u_p[idx]), cmap='viridis', origin='upper', extent=extent, aspect='equal')
 plt.colorbar(label="Top plate velocity (magnitude)")
 plt.show()
 
 plt.figure(figsize=(6,6))
-plt.imshow(np.abs(u_a), cmap='viridis', origin='upper', extent=extent, aspect='equal')
+plt.imshow(np.abs(u_a[idx]), cmap='viridis', origin='upper', extent=extent, aspect='equal')
 plt.colorbar(label="Air piston velocity (magnitude)")
 plt.show()
 
 plt.figure(figsize=(6,6))
-plt.imshow(np.abs(p_sound), cmap='cividis', origin='upper', extent=extent, aspect='equal')
+plt.imshow(np.abs(p_sound[idx]), cmap='cividis', origin='upper', extent=extent, aspect='equal')
 plt.colorbar(label="Sound pressure (magnitude)")
 plt.show()
 
-fig, axes = plt.subplots(1, len(materials), figsize=(18,6))
-
-for ax, (name, u_total) in zip(axes, results_per_material.items()):
-    im = ax.imshow(np.abs(u_total), cmap='viridis', origin='upper', extent=extent, aspect='equal')
-    ax.set_title(name)
-    ax.axis('off')
-
-fig.colorbar(im, ax=axes.ravel().tolist(), shrink=0.8, label="Plate + air piston velocity")
-plt.show()
