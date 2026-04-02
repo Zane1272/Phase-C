@@ -256,32 +256,26 @@ def rho_plate(x,y): #to be ammended according to Joanna´s findings
 
 
 
-def mass_function(image,rho):
-    #where rho must map to the side of the plate mask'''
+def mass_function(image, rho):
 
-    #using the same mapping as top plate vibration for eaiser later integration
-    img = Image.open("guitar_top.png").resize((200, 200))
+    img = Image.open(image).resize((200,200))
     arr = np.array(img)
 
     if arr.ndim == 3:
-        gray = arr[:, :, 0]
+        gray = arr[:,:,0]
     else:
-     gray = arr
+        gray = arr
+
     plate = gray < 128
-    white = gray > 200
 
-    labels, num = label(white)
-    if num > 0:
-        sizes = [(labels == i).sum() for i in range(1, num + 1)]
-        soundhole_label = 1 + np.argmax(sizes)
-        soundhole = labels == soundhole_label
-    else:
-        soundhole = np.zeros_like(plate, bool)
+    Nx, Ny = plate.shape
+    plate_mass = np.zeros_like(plate, dtype=float)
 
-    plate[soundhole] = False
-    clamped = ~(plate | soundhole)
+    for x in range(Nx):
+        for y in range(Ny):
+            if plate[x,y]:
+                plate_mass[x,y] = rho(x,y)
 
-    #from guitartop.py
     rows_with_plate = np.any(plate, axis=1)
     plate_row_indices = np.where(rows_with_plate)[0]
 
@@ -289,29 +283,12 @@ def mass_function(image,rho):
     bottom_row = plate_row_indices[-1]
     plate_pixel_height = bottom_row - top_row + 1
 
-
-    Nx, Ny = plate.shape
-
-    plate_mass = np.zeros_like(plate, dtype=float)
-
-    for x in range(Nx):
-        for y in range(Ny):
-            if plate[x,y]==True:
-             plate_mass[x,y] = rho(x,y)
-
     return plate_mass, plate_pixel_height
 
 
-m_p,plate_pixel_height = mass_function('guitar_top.png',rho_plate)
+m_p,plate_pixel_height = mass_function('ukulele_top.png',rho_plate)
 m_p[m_p == 0] = np.nan
 # we want this to be a function 
-m_a = 0.01      # kg, air piston mass
-k_p = 1000.0    # N/m, top plate stiffness
-R_p = 0.5       # kg/s, damping top plate
-R_a = 0.05      # kg/s, damping air piston
-A = 0.02        # want this as the same as above
-S = 0.01        # m^2, air piston area
-F0 = 1.0        # N, harmonic force amplitude
 
 # Derived frequencies
 omega_p = np.sqrt(k_p / m_p)      # rad/s, natural freq plate
@@ -351,13 +328,14 @@ physical_width_m = dx_phys * m_p.shape[1]
 
 extent = [0, physical_width_m * 100, physical_height_m * 100, 0]  # for cm
 
-idx = np.argmin(np.abs(frequencies - 440))
+freq = data["freq"]
+idx = np.argmin(np.abs(freq-440))
 
 results_acoustic = {}
 
 for mat in materials:
 
-    omega_map, plate = plate_frequency_map("guitar_top.png", mat)
+    omega_map, plate = plate_frequency_map("ukulele_top.png", mat)
 
     freq, u_p, u_a, p = plate_air_response(omega_map, plate, mat)
 
@@ -387,10 +365,12 @@ idx = np.argmin(np.abs(freq-440))
 
 for name,data in results_acoustic.items():
 
+    freq = data["freq"]
+    idx = np.argmin(np.abs(freq-440))
+
     plt.figure(figsize=(6,6))
     plt.title(name + " Plate Velocity")
 
     plt.imshow(np.abs(data["u_p"][idx]), cmap="viridis")
     plt.colorbar()
     plt.show()
-
