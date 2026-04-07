@@ -1,16 +1,28 @@
 #!/usr/bin/env python
 # coding: utf-8
-
-# In[1]:
-
 import numpy as np
 import matplotlib.pyplot as plt
 from PIL import Image
 from scipy.ndimage import label
 
-# -----------------------------
-# Load geometry
-# -----------------------------
+# In[1]:
+class Material:
+    def __init__(self, name, rho, E, damping):
+        self.name = name
+        self.rho = rho
+        self.E = E
+        self.damping = damping
+
+    def wave_speed(self):
+        return np.sqrt(self.E / self.rho)
+
+materials = [
+    Material("Wood", 600, 1.0e10, 0.995),
+    Material("PLA", 1250, 3.0e9, 0.993),
+    Material("ABS", 1050, 2.0e9, 0.992),
+    Material("Composite", 900, 5.0e9, 0.994)
+]
+
 
 def load_plate(image, nx=200, ny=200):
 
@@ -27,11 +39,8 @@ def load_plate(image, nx=200, ny=200):
     return plate
 
 
-# -----------------------------
-# Fake vibration field
-# -----------------------------
 
-def plate_mode_shape(plate):
+def plate_mode_shape(plate,material):
 
     Nx, Ny = plate.shape
 
@@ -41,16 +50,15 @@ def plate_mode_shape(plate):
     X, Y = np.meshgrid(x, y, indexing="ij")
 
     # simple plate mode
-    field = np.sin(2*X) * np.sin(3*Y)
+    #from Joanna´s model
+    c = material.wave_speed()
+
+    field = np.sin(2*X) * np.sin(3*Y) * (c/1000)
 
     field[~plate] = np.nan
 
     return field
 
-
-# -----------------------------
-# Fake acoustic pressure
-# -----------------------------
 
 def acoustic_field(field):
 
@@ -59,34 +67,36 @@ def acoustic_field(field):
     return pressure
 
 
-# -----------------------------
-# Run
-# -----------------------------
 
 FILE = "ukulele_top.png"
 
 plate = load_plate(FILE)
 
-mode = plate_mode_shape(plate)
+#find results for each material
 
-pressure = acoustic_field(mode)
+results = {}
 
-# -----------------------------
-# Plot results
-# -----------------------------
+for mat in materials:
 
-plt.figure(figsize=(6,6))
-plt.title("Plate Mode Shape")
-plt.imshow(mode, cmap="viridis")
-plt.colorbar(label="displacement")
-plt.show()
+    mode = plate_mode_shape(plate, mat)
+    pressure = acoustic_field(mode)
+
+    results[mat.name] = {
+        "mode": mode,
+        "pressure": pressure
+    }
 
 
-plt.figure(figsize=(6,6))
-plt.title("Acoustic Pressure (fake)")
-plt.imshow(pressure, cmap="inferno")
-plt.colorbar(label="pressure")
-plt.show()
+for name, data in results.items():
+
+    plt.figure(figsize=(6,6))
+    plt.title(name + " Plate Vibration")
+
+    plt.imshow(data["mode"], cmap="viridis")
+    plt.colorbar()
+
+    plt.axis("off")
+    plt.show()
 
 
 import numpy as np
