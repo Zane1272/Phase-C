@@ -3,6 +3,91 @@
 
 # In[1]:
 
+import numpy as np
+import matplotlib.pyplot as plt
+from PIL import Image
+from scipy.ndimage import label
+
+# -----------------------------
+# Load geometry
+# -----------------------------
+
+def load_plate(image, nx=200, ny=200):
+
+    img = Image.open(image).resize((nx, ny))
+    arr = np.array(img)
+
+    if arr.ndim == 3:
+        gray = arr[:, :, 0]
+    else:
+        gray = arr
+
+    plate = gray < 128
+
+    return plate
+
+
+# -----------------------------
+# Fake vibration field
+# -----------------------------
+
+def plate_mode_shape(plate):
+
+    Nx, Ny = plate.shape
+
+    x = np.linspace(0, np.pi, Nx)
+    y = np.linspace(0, np.pi, Ny)
+
+    X, Y = np.meshgrid(x, y, indexing="ij")
+
+    # simple plate mode
+    field = np.sin(2*X) * np.sin(3*Y)
+
+    field[~plate] = np.nan
+
+    return field
+
+
+# -----------------------------
+# Fake acoustic pressure
+# -----------------------------
+
+def acoustic_field(field):
+
+    pressure = np.abs(field)**2
+
+    return pressure
+
+
+# -----------------------------
+# Run
+# -----------------------------
+
+FILE = "ukulele_top.png"
+
+plate = load_plate(FILE)
+
+mode = plate_mode_shape(plate)
+
+pressure = acoustic_field(mode)
+
+# -----------------------------
+# Plot results
+# -----------------------------
+
+plt.figure(figsize=(6,6))
+plt.title("Plate Mode Shape")
+plt.imshow(mode, cmap="viridis")
+plt.colorbar(label="displacement")
+plt.show()
+
+
+plt.figure(figsize=(6,6))
+plt.title("Acoustic Pressure (fake)")
+plt.imshow(pressure, cmap="inferno")
+plt.colorbar(label="pressure")
+plt.show()
+
 
 import numpy as np
 import matplotlib.pyplot as plt
