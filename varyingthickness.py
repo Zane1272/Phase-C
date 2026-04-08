@@ -23,16 +23,6 @@ materials = [
     Material("Composite", 900, 5.0e9, 0.994)
 ]
 
-geo = GeometryProcessorPNG(FILE)
-mask, bridge_mask = geo.process()
-
-plate = mask > 0
-
-def rho_plate(x,y):
-    return 600
-
-plate_mass = rho_plate(0,0) * plate.astype(float)
-
 def load_plate(image, nx=200, ny=200):
 
     img = Image.open(image).resize((nx, ny))
@@ -47,7 +37,90 @@ def load_plate(image, nx=200, ny=200):
 
     return plate
 
+FILE = "ukulele_top.png"
 
+plate = load_plate(FILE)
+
+def rho_plate(x,y):
+    return 600
+
+plate_mass = rho_plate(0,0) * plate.astype(float)
+
+def plate_frequency_map(plate, material):
+
+    Nx, Ny = plate.shape
+
+    c = material.wave_speed()
+
+    L = 0.5
+    k = np.pi / L
+
+    omega_p_map = np.zeros_like(plate, dtype=float)
+
+    omega_p_map[plate] = c * k
+
+    omega_p_map[~plate] = np.nan
+
+    return omega_p_map
+
+
+def plate_air_response(omega_p_map, plate, material):
+
+    Nx, Ny = omega_p_map.shape
+
+    # parameters
+    m_a = 0.01
+    R_p = 0.5
+    R_a = 0.05
+    A = 0.02
+    S = 0.01
+    F0 = 1.0
+
+    omega_a = 200
+    a_coupling = 500
+
+    frequencies = np.linspace(50, 400, 1000)
+    omega = 2*np.pi*frequencies
+    omega3 = omega[:, None, None]
+
+    gamma_p = R_p
+    gamma_a = R_a/m_a
+
+    omega_c2 = a_coupling
+
+    # plate parameters
+    h = 0.003
+    nu = 0.3
+
+    rho_p = material.rho
+    m_p = rho_p * h
+
+    # bending stiffness
+    D = material.E * h**3 / (12*(1-nu**2))
+
+    omega_p = omega_p_map
+
+    denom = (
+        (omega_p**2 - omega3**2 + 1j*gamma_p*omega3) *
+        (omega_a**2 - omega3**2 + 1j*gamma_a*omega3)
+        - omega_c2
+    )
+
+    u_p = 1j*omega3*F0*(omega_a**2 - omega3**2 + 1j*gamma_a*omega3)/denom
+    u_a = -1j*omega3*F0*(A/S)*(omega_p**2 - omega3**2 + 1j*gamma_p*omega3)/denom
+
+    rho_air = 1.2
+    R_dist = 1.0
+
+    U = A*u_p + S*u_a
+
+    p_sound = -1j*rho_air*omega3*U/(4*np.pi*R_dist)
+
+    u_p[:,~plate] = np.nan
+    u_a[:,~plate] = np.nan
+    p_sound[:,~plate] = np.nan
+
+    return frequencies, u_p, u_a, p_sound
 
 def plate_mode_shape(plate,material):
 
@@ -76,37 +149,36 @@ def acoustic_field(field):
     return pressure
 
 
-
-FILE = "ukulele_top.png"
-
-plate = load_plate(FILE)
-
 #find results for each material
 
 results = {}
 
 for mat in materials:
 
-    mode = plate_mode_shape(plate, mat)
-    pressure = acoustic_field(mode)
+    omega_map = plate_frequency_map(plate, mat)
+
+    freqs, u_p, u_a, p = plate_air_response(
+        omega_map,
+        plate,
+        mat
+    )
+
+    pressure = np.nanmean(np.abs(p)**2, axis=0)
 
     results[mat.name] = {
-        "mode": mode,
         "pressure": pressure
     }
-
 
 for name, data in results.items():
 
     plt.figure(figsize=(6,6))
-    plt.title(name + " Plate Vibration")
+    plt.title(name + " Radiated Sound Pressure")
 
-    plt.imshow(data["mode"], cmap="viridis")
+    plt.imshow(data["pressure"], cmap="inferno")
     plt.colorbar()
 
     plt.axis("off")
     plt.show()
-
 
 import numpy as np
 import matplotlib.pyplot as plt
