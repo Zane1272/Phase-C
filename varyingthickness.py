@@ -23,6 +23,15 @@ materials = [
     Material("Composite", 900, 5.0e9, 0.994)
 ]
 
+geo = GeometryProcessorPNG(FILE)
+mask, bridge_mask = geo.process()
+
+plate = mask > 0
+
+def rho_plate(x,y):
+    return 600
+
+plate_mass = rho_plate(0,0) * plate.astype(float)
 
 def load_plate(image, nx=200, ny=200):
 
