@@ -141,6 +141,41 @@ def plate_mode_shape(plate,material):
 
     return field
 
+def compute_plate_modes(plate, material, n_modes=6):
+
+    Nx, Ny = plate.shape
+
+    x = np.linspace(0, 1, Nx)
+    y = np.linspace(0, 1, Ny)
+    X, Y = np.meshgrid(x, y, indexing="ij")
+
+    h = 0.003
+    nu = 0.3
+
+    rho = material.rho
+    E = material.E
+
+    D = E*h**3/(12*(1-nu**2))
+
+    Lx = 0.35
+    Ly = 0.25
+
+    modes = []
+    freqs = []
+
+    for m in range(1, n_modes+1):
+        for n in range(1, n_modes+1):
+
+            phi = np.sin(m*np.pi*X) * np.sin(n*np.pi*Y)
+
+            omega = (np.pi**2)*np.sqrt(D/(rho*h))*((m**2/Lx**2)+(n**2/Ly**2))
+
+            phi[~plate] = np.nan
+
+            modes.append(phi)
+            freqs.append(omega)
+
+    return np.array(modes), np.array(freqs)
 
 def acoustic_field(field):
 
@@ -148,6 +183,32 @@ def acoustic_field(field):
 
     return pressure
 
+def modal_response(modes, freqs, material):
+
+    frequencies = np.linspace(50,2000,1000)
+    omega = 2*np.pi*frequencies
+
+    gamma = (1-material.damping)*50
+
+    field = np.zeros((len(frequencies),)+modes[0].shape,dtype=complex)
+
+    for k,phi in enumerate(modes):
+
+        w_m = freqs[k]
+
+        response = 1/(w_m**2 - omega[:,None,None]**2 + 1j*gamma*omega[:,None,None])
+
+        field += response*phi
+
+    return frequencies, field
+
+def air_radiation(field):
+
+    rho_air = 1.2
+
+    pressure = np.abs(field)**2
+
+    return pressure
 
 #find results for each material
 
@@ -155,19 +216,13 @@ results = {}
 
 for mat in materials:
 
-    omega_map = plate_frequency_map(plate, mat)
+    modes, freqs = compute_plate_modes(plate, mat, n_modes=5)
 
-    freqs, u_p, u_a, p = plate_air_response(
-        omega_map,
-        plate,
-        mat
-    )
+    f, field = modal_response(modes, freqs, mat)
 
-    pressure = np.nanmean(np.abs(p)**2, axis=0)
+    pressure = np.nanmean(air_radiation(field),axis=0)
 
-    results[mat.name] = {
-        "pressure": pressure
-    }
+    results[mat.name] = {"pressure":pressure}
 
 for name, data in results.items():
 
