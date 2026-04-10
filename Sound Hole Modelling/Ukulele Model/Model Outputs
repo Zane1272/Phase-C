@@ -1,0 +1,26 @@
+Detected body height in image:
+  157 px
+
+Pixel scale:
+  1.656 mm/pixel
+
+Detected original soundhole:
+  center = (94.0, 78.0) px
+  detected radius = 13.00 px
+
+Recommended soundhole size:
+  radius = 21.53 mm
+  diameter = 43.06 mm
+
+Optimal soundhole placement:
+  x = 94.0 px (fixed at body centerline)
+  y = 100.0 px
+
+Acoustic estimate:
+  Helmholtz frequency ≈ 209.4 Hz
+  Effective neck length ≈ 39.60 mm
+  Peak response at optimal y ≈ 2.274149e-04
+
+Interpretation:
+  - Hole size mainly sets the Helmholtz resonance frequency.
+  - Hole y-position mainly changes coupling strength.
