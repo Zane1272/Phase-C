@@ -34,7 +34,6 @@ SEARCH_UPPER_FRACTION = 0.80       # search y only above this fraction of image 
 
 # --- Plot options ---
 SHOW_DEBUG_MASKS = True
-SAVE_PLOTS = False
 
 
 
@@ -51,14 +50,8 @@ def detect_body_and_hole(gray, threshold_dark, threshold_bright):
     as the largest bright component inside that body.
     """
     dark = gray < threshold_dark
-
-    # Fill enclosed regions so the body becomes solid
     body_mask = binary_fill_holes(dark)
-
-    # Bright pixels
     bright = gray > threshold_bright
-
-    # Only consider bright regions inside the body as soundhole candidates
     bright_inside = bright & body_mask
 
     labels, num = label(bright_inside)
@@ -71,7 +64,7 @@ def detect_body_and_hole(gray, threshold_dark, threshold_bright):
         for i in range(1, num + 1):
             region = labels == i
 
-            # Reject bright regions touching the image border
+            
             touches_border = (
                 region[0, :].any() or region[-1, :].any() or
                 region[:, 0].any() or region[:, -1].any()
