@@ -166,11 +166,15 @@ def compute_plate_modes(plate, material, n_modes=6):
     for m in range(1, n_modes+1):
         for n in range(1, n_modes+1):
 
-            phi = np.sin(m*np.pi*X) * np.sin(n*np.pi*Y)
+            phi = np.sin(m*np.pi*X) * np.sin(n*np.pi*Y) * plate.astype(float)
 
-            omega = (np.pi**2)*np.sqrt(D/(rho*h))*((m**2/Lx**2)+(n**2/Ly**2))
+            effective_area = np.sum(plate)
+            area_factor = effective_area / (Nx * Ny)
 
-            phi[~plate] = np.nan
+            omega = (np.pi**2)*np.sqrt(D/(rho*h))*((m**2/Lx**2)+(n**2/Ly**2)) * area_factor
+
+            edge_weight = 0.8 + 0.2 * plate.astype(float)
+            phi = phi * edge_weight
 
             modes.append(phi)
             freqs.append(omega)
