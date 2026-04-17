@@ -251,3 +251,51 @@ fig.colorbar(im, ax=axes.ravel().tolist(), shrink=0.7)
 plt.suptitle("Material Comparison of Radiated Sound Pressure")
 
 plt.show()
+
+
+FILE = "ukulele_optimal.png"
+
+plate = load_plate(FILE)
+
+plate_mass = rho_plate(0,0) * plate.astype(float)
+
+
+results = {}
+
+for mat in materials:
+
+    modes, freqs = compute_plate_modes(plate, mat, n_modes=5)
+
+    f, field = modal_response(modes, freqs, mat)
+
+    pressure = np.nanmean(air_radiation(field),axis=0)
+
+    results[mat.name] = {"pressure":pressure}
+
+for name, data in results.items():
+
+    plt.figure(figsize=(6,6))
+    plt.title(name + " Radiated Sound Pressure")
+
+    plt.imshow(data["pressure"], cmap="inferno")
+    plt.colorbar()
+
+    plt.axis("off")
+    plt.show()
+
+fig, axes = plt.subplots(2,2, figsize=(10,10))
+
+axes = axes.flatten()
+
+for ax,(name,data) in zip(axes, results.items()):
+
+    im = ax.imshow(data["pressure"], cmap="inferno")
+
+    ax.set_title(name)
+    ax.axis("off")
+
+fig.colorbar(im, ax=axes.ravel().tolist(), shrink=0.7)
+
+plt.suptitle("Material Comparison of Radiated Sound Pressure")
+
+plt.show()
