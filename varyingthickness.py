@@ -42,7 +42,7 @@ FILE = "ukulele_top.png"
 plate = load_plate(FILE)
 
 def rho_plate(x,y):
-    return 600
+    return 700
 
 plate_mass = rho_plate(0,0) * plate.astype(float)
 
